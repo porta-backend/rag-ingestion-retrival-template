@@ -4,7 +4,7 @@
 .env.development.local
 .env.test.local
 .env.production.local
-
+schema.sql
 # Python
 __pycache__/
 *.py[cod]
