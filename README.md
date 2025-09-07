@@ -1,4 +1,4 @@
-# RAG (Retrieval-Augmented Generation) System with Database Integration
+# RAG (Retrieval-Augmented Generation) System
 
 A comprehensive Python-based RAG system that processes PDF documents from AWS S3, extracts text, creates embeddings using Amazon Bedrock's Titan embedding model, and stores everything in a PostgreSQL database with pgvector support for efficient similarity search.
 
@@ -13,6 +13,7 @@ A comprehensive Python-based RAG system that processes PDF documents from AWS S3
 - **Ingestion Tracking**: Tracks ingestion runs with status and metadata
 - **Comprehensive Metadata**: Stores rich metadata for sources, documents, and chunks
 - **Error Handling**: Comprehensive error handling for robust operation
+- **Conversational RAG**: Chat interface with session management and conversation history
 
 ## Prerequisites
 
@@ -79,16 +80,16 @@ Before running the system, ensure your PostgreSQL database has the required sche
 - `chunks`: Stores text chunks with full-text search support
 - `chunk_embeddings`: Stores vector embeddings with pgvector support
 
-See the database schema in your database setup for the complete table definitions.
+See the database schema files for the complete table definitions.
 
 ## Usage
 
-### 1. Start the API Service
+### 1. Start the Database API Service
 
 First, start the database API service:
 
 ```bash
-python start_api.py
+python rag_service.py
 ```
 
 This will start the FastAPI service on `http://localhost:8000`. You can view the API documentation at `http://localhost:8000/docs`.
@@ -98,7 +99,7 @@ This will start the FastAPI service on `http://localhost:8000`. You can view the
 In a new terminal, run the RAG ingestion:
 
 ```bash
-python rag.py
+python rag_ingestion.py
 ```
 
 The script will:
@@ -114,9 +115,20 @@ The script will:
    - Store everything in the database via API
 6. Update ingestion run status via API
 
-### 3. API Endpoints
+### 3. Start the Conversational RAG Service
 
-The API service provides the following endpoints:
+In another terminal, start the conversational RAG service:
+
+```bash
+python rag_retrival.py
+```
+
+This will start the conversational RAG API on `http://localhost:8001`.
+
+## API Endpoints
+
+### Database API (Port 8000)
+
 - `GET /health` - Health check
 - `POST /embedding-models` - Create/get embedding models
 - `POST /ingestion-runs` - Create ingestion runs
@@ -125,27 +137,34 @@ The API service provides the following endpoints:
 - `POST /documents` - Create documents
 - `POST /chunks` - Create chunks
 - `POST /embeddings` - Create embeddings
+- `POST /query` - Query for relevant chunks using vector similarity
+- `GET /documents` - Get documents with pagination
+- `GET /documents/{document_id}/chunks` - Get chunks for a specific document
+- `GET /chunks/{chunk_id}` - Get detailed information about a specific chunk
+- `GET /embedding-models` - Get all embedding models
+- `GET /debug/stats` - Get debug statistics about the database
 
-## Output
+### Conversational RAG API (Port 8001)
 
-The system provides:
-- **Console Output**: Detailed information about processed files, chunks, and embedding statistics
-- **Database Storage**: All documents, chunks, and embeddings stored in PostgreSQL
-- **Ingestion Tracking**: Complete audit trail of ingestion runs and their status
-- **Vector Search Results**: Similarity scores and document metadata for search queries
+- `GET /health` - Health check
+- `POST /chat` - Chat with the RAG system
+- `DELETE /chat/{session_id}` - Clear a chat session
+- `GET /chat/sessions` - List active chat sessions
 
 ## Project Structure
 
 ```
-rag_highlevel/
-├── rag.py              # Main RAG implementation (uses API for database)
-├── api_service.py      # FastAPI service for database operations
-├── start_api.py        # Script to start the API service
-├── requirements.txt    # Python dependencies
-├── .env                # Environment variables (create from template)
-├── .gitignore         # Git ignore rules
-├── README.md          # This file
-└── venv/              # Virtual environment (not tracked)
+rag_ingestion/
+├── rag_ingestion.py      # Main RAG ingestion script
+├── rag_service.py        # FastAPI service for database operations
+├── rag_retrival.py       # Conversational RAG API service
+├── requirements.txt      # Python dependencies
+├── schema_rag_ingestion.sql  # Database schema for RAG system
+├── schema_users&chat.sql     # Database schema for users and chat
+├── .env                  # Environment variables (create from template)
+├── .gitignore           # Git ignore rules
+├── README.md            # This file
+└── venv/                # Virtual environment (not tracked)
 ```
 
 ## Key Functions
@@ -158,29 +177,34 @@ rag_highlevel/
 - `embed_chunks()`: Generates embeddings using Bedrock
 
 ### Database Functions
-- `get_db_connection()`: Creates PostgreSQL connection with pgvector support
+- `get_db_pool()`: Creates PostgreSQL connection pool with pgvector support
 - `get_or_create_embedding_model()`: Manages embedding model configurations
 - `create_ingestion_run()`: Tracks ingestion process runs
 - `get_or_create_source()`: Manages source information
 - `create_document()`: Stores document metadata and content
 - `create_chunks()`: Stores text chunks with metadata
 - `create_chunk_embeddings()`: Stores vector embeddings
-- `search_similar_chunks()`: Performs vector similarity search
-- `get_ingestion_run_summary()`: Retrieves ingestion run statistics
+- `query_chunks()`: Performs vector similarity search
+
+### Conversational RAG Functions
+- `fetch_relevant_documents()`: Retrieves relevant documents for queries
+- `get_or_create_session()`: Manages chat sessions with memory
+- `ServiceRetriever`: Custom retriever for the conversational chain
 
 ### Main Functions
-- `process_s3_file_to_database()`: Processes a single S3 file end-to-end
+- `process_s3_file_to_api()`: Processes a single S3 file end-to-end
 - `main()`: Orchestrates the entire RAG pipeline with database integration
 
 ## Configuration Options
 
-- **Chunk Size**: Default 1000 characters (configurable in `chunk_text()`)
-- **Chunk Overlap**: Default 200 characters (configurable in `chunk_text()`)
+- **Chunk Size**: Default 300 characters (configurable in `chunk_text()`)
+- **Chunk Overlap**: Default 60 characters (configurable in `chunk_text()`)
 - **Embedding Model**: Amazon Titan Embed Text v1 (1536 dimensions)
 - **AWS Region**: Configurable via environment variable
 - **Database Connection**: PostgreSQL with pgvector extension
-- **Similarity Threshold**: Configurable in search functions (default 0.7)
-- **Search Limit**: Configurable number of results (default 5)
+- **Similarity Threshold**: Configurable in search functions (default 0.5 for retrieval, 0.7 for direct search)
+- **Search Limit**: Configurable number of results (default 10)
+- **Chat Memory**: Maintains conversation history with window of 5 messages
 
 ## Error Handling
 
@@ -193,6 +217,7 @@ The system includes comprehensive error handling for:
 - Invalid file formats
 - Embedding generation failures
 - Database transaction rollbacks
+- API service failures
 
 ## Contributing
 

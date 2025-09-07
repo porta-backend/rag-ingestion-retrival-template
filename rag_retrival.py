@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 from langchain_aws.chat_models import ChatBedrockConverse
 from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
+from langchain.memory import ConversationBufferWindowMemory
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -27,11 +27,14 @@ class ChatResponse(BaseModel):
 
 class RetrievalConfig(BaseModel):
     max_results: int = 10
-    similarity_threshold: float = 0.7
+    similarity_threshold: float = 0.5
     model_name: str = "amazon.titan-embed-text-v1"
 
 def fetch_relevant_documents(query: str, config: RetrievalConfig) -> List[Document]:
     try:
+        print(f"[RETRIEVAL] Query: {query[:100]}...")
+        print(f"[RETRIEVAL] Config: threshold={config.similarity_threshold}, max_results={config.max_results}, model={config.model_name}")
+        
         with httpx.Client(base_url=API_BASE_URL, timeout=30.0) as client:
             response = client.post("/query", json={
                 "query": query,
@@ -42,8 +45,12 @@ def fetch_relevant_documents(query: str, config: RetrievalConfig) -> List[Docume
             response.raise_for_status()
             result = response.json()
         
+        print(f"[RETRIEVAL] API returned {len(result.get('results', []))} results")
+        
         documents = []
-        for chunk in result.get("results", []):
+        for i, chunk in enumerate(result.get("results", [])):
+            print(f"[RETRIEVAL] Result {i+1}: similarity={chunk.get('similarity_score', 'N/A'):.4f}, content={chunk.get('content', '')[:50]}...")
+            
             metadata = {
                 "chunk_id": chunk.get("chunk_id"),
                 "similarity_score": chunk.get("similarity_score"),
@@ -61,7 +68,7 @@ def fetch_relevant_documents(query: str, config: RetrievalConfig) -> List[Docume
         
         return documents
     except Exception as e:
-        print(f"Error in service retrieval: {str(e)}")
+        print(f"[RETRIEVAL] Error in service retrieval: {str(e)}")
         return []
 
 session_state: Dict[str, Dict] = {}
@@ -79,8 +86,8 @@ You are a helpful assistant that answers questions based ONLY on the provided co
 IMPORTANT RULES:
 1. ONLY use information from the provided context documents below
 2. If the answer is not in the context documents, say "I don't have enough information in the provided documents to answer this question."
-3. Do not make up or guess any information
-4. Be precise and cite specific information from the documents when possible
+3. Answer everything in less than 100 words and bullet points are only allowed
+4. Everything should be in the markdown format
 
 Context Documents:
 {context}
@@ -95,7 +102,7 @@ Answer based ONLY on the context documents above:
         
         retriever_config = RetrievalConfig()
         retriever_instance = ServiceRetriever(API_BASE_URL, retriever_config)
-        memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, output_key="answer")
+        memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, output_key="answer", k=5)
         
         conversational_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
@@ -142,9 +149,18 @@ async def chat_endpoint(input_data: QueryInput):
     session_id = input_data.session_id or "default_session"
     
     try:
+        print(f"[CHAT] Processing query: {input_data.query}")
         chain, memory = get_or_create_session(session_id)
         
+        config = RetrievalConfig()
+        retriever_instance = ServiceRetriever(API_BASE_URL, config)
+        test_docs = retriever_instance._get_relevant_documents(input_data.query)
+        print(f"[CHAT] Direct retrieval test: {len(test_docs)} documents")
+        
         response = chain.invoke({"question": input_data.query})
+        
+        print(f"[CHAT] Chain response keys: {response.keys()}")
+        print(f"[CHAT] Source documents count: {len(response.get('source_documents', []))}")
         
         source_documents = [doc.metadata for doc in response.get("source_documents", [])]
         chat_history_list = [
@@ -158,6 +174,7 @@ async def chat_endpoint(input_data: QueryInput):
             chat_history=chat_history_list
         )
     except Exception as e:
+        print(f"[CHAT] Error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An internal error occurred: {str(e)}"

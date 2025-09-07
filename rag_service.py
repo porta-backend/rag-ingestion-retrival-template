@@ -1,7 +1,3 @@
-"""
-FastAPI service for RAG database operations.
-Handles all database interactions asynchronously.
-"""
 
 import os
 import json
@@ -20,11 +16,9 @@ load_dotenv()
 
 app = FastAPI(title="RAG Database API", version="1.0.0")
 
-# Database connection pool
 db_pool = None
 
 async def get_db_pool():
-    """Get database connection pool"""
     global db_pool
     if db_pool is None:
         db_pool = await asyncpg.create_pool(
@@ -34,26 +28,21 @@ async def get_db_pool():
             password=os.getenv('PASSWORD'),
             database=os.getenv('DATABASE'),
             min_size=1,
-            max_size=10
+            max_size=10,
+            init=register_vector
         )
-        # Register vector extension for all connections
-        async with db_pool.acquire() as conn:
-            await register_vector(conn)
     return db_pool
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database pool on startup"""
     await get_db_pool()
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Close database pool on shutdown"""
     global db_pool
     if db_pool:
         await db_pool.close()
 
-# Pydantic models for request/response
 class EmbeddingModelCreate(BaseModel):
     name: str = "amazon.titan-embed-text-v1"
     provider: str = "bedrock"
@@ -182,13 +171,12 @@ class EmbeddingResponse(BaseModel):
             return [str(item) if hasattr(item, '__str__') else item for item in v]
         return v
 
-# New models for incremental processing
 class S3Precheck(BaseModel):
     bucket: str
     key: str
     etag: Optional[str] = None
     size: Optional[int] = None
-    last_modified: Optional[str] = None  # ISO format
+    last_modified: Optional[str] = None
 
 class S3PrecheckResp(BaseModel):
     should_download: bool
@@ -198,7 +186,6 @@ class ChecksumExistsResp(BaseModel):
     exists: bool = False
     document_id: Optional[str] = None
 
-# Query models for RAG retrieval
 class QueryRequest(BaseModel):
     query: str
     similarity_threshold: float = 0.7
@@ -223,15 +210,12 @@ class QueryResponse(BaseModel):
     similarity_threshold: float
     model_name: str
 
-# API Endpoints
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {"status": "healthy"}
 
 @app.post("/precheck/s3", response_model=S3PrecheckResp)
 async def precheck_s3(obj: S3Precheck):
-    """Check if S3 object should be downloaded based on fingerprint comparison"""
     pool = await get_db_pool()
     uri = f"s3://{obj.bucket}/{obj.key}"
     
@@ -245,19 +229,13 @@ async def precheck_s3(obj: S3Precheck):
         if not row:
             return S3PrecheckResp(should_download=True, source_id=None)
 
-        # Check etag match
         same_etag = (obj.etag is not None and obj.etag == row["s3_etag"])
         
-        # Check last_modified match from metadata
         stored_metadata = json.loads(row["metadata"]) if row["metadata"] else {}
         stored_last_modified = stored_metadata.get("last_modified")
         same_last_modified = (obj.last_modified is not None and 
                              stored_last_modified is not None and 
                              obj.last_modified == stored_last_modified)
-        
-        # Conservative check: both etag and last_modified must match to skip download
-        # This provides better safety against edge cases where etag might be the same
-        # but the file was actually modified
         if same_etag and same_last_modified:
             await conn.execute("UPDATE sources SET last_seen_at = now() WHERE id=$1", row["id"])
             return S3PrecheckResp(should_download=False, source_id=str(row["id"]))
@@ -266,7 +244,6 @@ async def precheck_s3(obj: S3Precheck):
 
 @app.get("/documents/checksum-exists", response_model=ChecksumExistsResp)
 async def checksum_exists(sha: str = Query(..., min_length=64, max_length=64)):
-    """Check if a document with the given SHA-256 checksum already exists"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
@@ -280,11 +257,9 @@ async def checksum_exists(sha: str = Query(..., min_length=64, max_length=64)):
 
 @app.post("/embedding-models", response_model=EmbeddingModelResponse)
 async def create_or_get_embedding_model(model: EmbeddingModelCreate):
-    """Create or get embedding model"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
-        # Check if model exists
         existing = await conn.fetchrow("""
             SELECT id, name, provider, embedding_dim, distance_metric, version 
             FROM embedding_models 
@@ -294,7 +269,6 @@ async def create_or_get_embedding_model(model: EmbeddingModelCreate):
         if existing:
             return EmbeddingModelResponse(**dict(existing))
         
-        # Create new model (let database generate UUID)
         row = await conn.fetchrow("""
             INSERT INTO embedding_models (name, provider, embedding_dim, distance_metric, version)
             VALUES ($1, $2, $3, $4, $5)
@@ -305,7 +279,6 @@ async def create_or_get_embedding_model(model: EmbeddingModelCreate):
 
 @app.post("/ingestion-runs", response_model=IngestionRunResponse)
 async def create_ingestion_run(run: IngestionRunCreate):
-    """Create a new ingestion run"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
@@ -319,7 +292,6 @@ async def create_ingestion_run(run: IngestionRunCreate):
 
 @app.put("/ingestion-runs/{run_id}")
 async def update_ingestion_run(run_id: str, update: IngestionRunUpdate):
-    """Update ingestion run status"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
@@ -340,11 +312,9 @@ async def update_ingestion_run(run_id: str, update: IngestionRunUpdate):
 
 @app.post("/sources", response_model=SourceResponse)
 async def create_or_get_source(source: SourceCreate):
-    """Create or get source using UPSERT for idempotent operations"""
     pool = await get_db_pool()
     m = source.metadata or {}
     
-    # If this is an S3 source and we have last_modified info, store it in metadata
     if source.kind == 's3' and source.last_modified:
         m['last_modified'] = source.last_modified
     
@@ -361,14 +331,12 @@ async def create_or_get_source(source: SourceCreate):
              source.s3_etag, source.content_hash, json.dumps(m))
         
         rec = dict(row)
-        # asyncpg returns text for jsonb unless codecs are set; make sure it's dict:
         if isinstance(rec.get("metadata"), str):
             rec["metadata"] = json.loads(rec["metadata"])
         return SourceResponse(**rec)
 
 @app.post("/documents", response_model=DocumentResponse)
 async def create_document(document: DocumentCreate):
-    """Create document using UPSERT for idempotent operations"""
     pool = await get_db_pool()
     m = document.metadata or {}
     content_hash = hashlib.sha256(document.content.encode("utf-8")).hexdigest() if document.content else None
@@ -389,7 +357,6 @@ async def create_document(document: DocumentCreate):
 
 @app.post("/chunks", response_model=ChunkResponse)
 async def create_chunks(chunk_data: ChunkCreate):
-    """Create chunks for a document using bulk operations"""
     print(f"[CHUNKS API] Received request: {len(chunk_data.chunks)} chunks for document {chunk_data.document_id}")
     
     pool = await get_db_pool()
@@ -402,7 +369,7 @@ async def create_chunks(chunk_data: ChunkCreate):
     tokens = [len(c)//4 for c in chunk_data.chunks]
     metas_json = [json.dumps(m) for m in metas]
 
-    print(f"[CHUNKS API] Preparing to insert {n} chunks (letting database generate UUIDs)")
+    print(f"[CHUNKS API] Preparing to insert {n} chunks")
 
     try:
         async with pool.acquire() as conn:
@@ -412,7 +379,6 @@ async def create_chunks(chunk_data: ChunkCreate):
                 delete_result = await conn.execute("DELETE FROM chunks WHERE document_id=$1", chunk_data.document_id)
                 print(f"[CHUNKS API] Deleted old chunks: {delete_result}")
                 
-                # Let database generate UUIDs and return them
                 rows = await conn.fetch("""
                   INSERT INTO chunks (document_id, chunk_index, content, token_count, metadata)
                   SELECT $1::uuid, UNNEST($2::int[]), UNNEST($3::text[]), UNNEST($4::int[]), UNNEST($5::jsonb[])
@@ -420,10 +386,9 @@ async def create_chunks(chunk_data: ChunkCreate):
                 """, chunk_data.document_id, idxs, chunk_data.chunks, tokens, metas_json)
                 
                 ids = [str(row['id']) for row in rows]
-                print(f"[CHUNKS API] Successfully inserted {len(ids)} chunks with database-generated UUIDs")
+                print(f"[CHUNKS API] Successfully inserted {len(ids)} chunks")
                 print(f"[CHUNKS API] Generated chunk IDs, first 3: {ids[:3]}")
                 
-                # Verify chunks were inserted
                 count = await conn.fetchval("SELECT COUNT(*) FROM chunks WHERE document_id=$1", chunk_data.document_id)
                 print(f"[CHUNKS API] Verification: {count} chunks found in database for document {chunk_data.document_id}")
                 
@@ -435,12 +400,21 @@ async def create_chunks(chunk_data: ChunkCreate):
 
 @app.post("/embeddings", response_model=EmbeddingResponse)
 async def create_embeddings(embedding_data: EmbeddingCreate):
-    """Create chunk embeddings with idempotent operations"""
     print(f"[EMBEDDING API] Received request: {len(embedding_data.chunk_ids)} chunks, model_id: {embedding_data.model_id}")
     
     pool = await get_db_pool()
     if len(embedding_data.chunk_ids) != len(embedding_data.embeddings):
         raise HTTPException(status_code=400, detail="chunk_ids and embeddings length must match")
+    
+    for i, embedding in enumerate(embedding_data.embeddings):
+        if not isinstance(embedding, list):
+            raise HTTPException(status_code=400, detail=f"Embedding {i} is not a list, got {type(embedding)}")
+        if not all(isinstance(x, (int, float)) for x in embedding):
+            raise HTTPException(status_code=400, detail=f"Embedding {i} contains non-numeric values")
+        if len(embedding) == 0:
+            raise HTTPException(status_code=400, detail=f"Embedding {i} is empty")
+    
+    print(f"[EMBEDDING API] Validated {len(embedding_data.embeddings)} embeddings, first embedding length: {len(embedding_data.embeddings[0]) if embedding_data.embeddings else 'N/A'}")
 
     embedding_ids = []
     
@@ -449,7 +423,6 @@ async def create_embeddings(embedding_data: EmbeddingCreate):
             async with conn.transaction():
                 print(f"[EMBEDDING API] Starting transaction for {len(embedding_data.chunk_ids)} embeddings")
                 
-                # First, verify all chunk IDs exist
                 existing_chunks = await conn.fetch("""
                   SELECT id FROM chunks WHERE id = ANY($1::uuid[])
                 """, embedding_data.chunk_ids)
@@ -461,7 +434,6 @@ async def create_embeddings(embedding_data: EmbeddingCreate):
                     print(f"[EMBEDDING API] ERROR: Missing chunks: {list(missing_chunks)[:5]}...")
                     raise HTTPException(status_code=400, detail=f"Missing {len(missing_chunks)} chunk(s) in database")
                 
-                # Mark old as not current (idempotent upsert semantics)
                 result = await conn.execute("""
                   UPDATE chunk_embeddings
                   SET is_current = FALSE, updated_at = now()
@@ -469,15 +441,20 @@ async def create_embeddings(embedding_data: EmbeddingCreate):
                 """, embedding_data.chunk_ids, embedding_data.model_id)
                 print(f"[EMBEDDING API] Updated {result.split(' ')[-1] if result else '0'} old embeddings to not current")
 
-                # Insert new embeddings individually (pgvector works better this way)
                 for i, (chunk_id, embedding_vector) in enumerate(zip(embedding_data.chunk_ids, embedding_data.embeddings)):
-                    # With pgvector.asyncpg registered, we can pass the list directly
-                    row = await conn.fetchrow("""
-                      INSERT INTO chunk_embeddings (chunk_id, model_id, embedding, is_current, created_at, updated_at)
-                      VALUES ($1, $2, $3, TRUE, now(), now())
-                      RETURNING id
-                    """, chunk_id, embedding_data.model_id, embedding_vector)
-                    embedding_ids.append(str(row['id']))
+                    try:
+                        print(f"[EMBEDDING API] Inserting embedding {i+1}/{len(embedding_data.embeddings)}, vector length: {len(embedding_vector)}")
+                        row = await conn.fetchrow("""
+                          INSERT INTO chunk_embeddings (chunk_id, model_id, embedding, is_current, created_at, updated_at)
+                          VALUES ($1, $2, $3, TRUE, now(), now())
+                          RETURNING id
+                        """, chunk_id, embedding_data.model_id, embedding_vector)
+                        embedding_ids.append(str(row['id']))
+                    except Exception as e:
+                        print(f"[EMBEDDING API] ERROR inserting embedding {i+1}: {str(e)}")
+                        print(f"[EMBEDDING API] Chunk ID: {chunk_id}, Model ID: {embedding_data.model_id}")
+                        print(f"[EMBEDDING API] Vector type: {type(embedding_vector)}, length: {len(embedding_vector) if hasattr(embedding_vector, '__len__') else 'N/A'}")
+                        raise
                 
                 print(f"[EMBEDDING API] Successfully inserted {len(embedding_ids)} embeddings")
     
@@ -487,14 +464,11 @@ async def create_embeddings(embedding_data: EmbeddingCreate):
 
     return EmbeddingResponse(embedding_ids=embedding_ids)
 
-# New retrieval endpoints for RAG system
 @app.get("/documents")
 async def get_documents(limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
-    """Get documents with pagination"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
-        # Get documents with source info
         rows = await conn.fetch("""
             SELECT d.id, d.title, d.author, d.uri, d.mime_type, d.created_at,
                    s.kind as source_kind, s.uri as source_uri
@@ -505,7 +479,6 @@ async def get_documents(limit: int = Query(100, ge=1, le=1000), offset: int = Qu
             LIMIT $1 OFFSET $2
         """, limit, offset)
         
-        # Get total count
         total_count = await conn.fetchval("SELECT COUNT(*) FROM documents WHERE state = 'active'")
         
         return {
@@ -517,7 +490,6 @@ async def get_documents(limit: int = Query(100, ge=1, le=1000), offset: int = Qu
 
 @app.get("/documents/{document_id}/chunks")
 async def get_document_chunks(document_id: str, limit: int = Query(100, ge=1, le=1000)):
-    """Get chunks for a specific document"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
@@ -542,13 +514,11 @@ async def search_similar_chunks(
     max_results: int = Query(10, ge=1, le=100),
     model_name: str = Query("amazon.titan-embed-text-v1")
 ):
-    """Search for similar chunks using vector similarity"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
-        # Use the find_similar_chunks function from schema
         rows = await conn.fetch("""
-            SELECT * FROM find_similar_chunks($1::vector, $2, $3, $4)
+            SELECT * FROM find_similar_chunks($1::vector(1536), $2::float, $3::int, $4::text)
         """, query_embedding, similarity_threshold, max_results, model_name)
         
         return {
@@ -562,7 +532,6 @@ async def search_similar_chunks(
 
 @app.get("/chunks/{chunk_id}")
 async def get_chunk_details(chunk_id: str):
-    """Get detailed information about a specific chunk"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
@@ -583,7 +552,6 @@ async def get_chunk_details(chunk_id: str):
 
 @app.get("/embedding-models")
 async def get_embedding_models():
-    """Get all embedding models"""
     pool = await get_db_pool()
     
     async with pool.acquire() as conn:
@@ -598,31 +566,66 @@ async def get_embedding_models():
             "count": len(rows)
         }
 
+@app.get("/debug/stats")
+async def get_debug_stats():
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        embedding_count = await conn.fetchval("SELECT COUNT(*) FROM chunk_embeddings WHERE is_current = TRUE")
+        chunk_count = await conn.fetchval("SELECT COUNT(*) FROM chunks")
+        document_count = await conn.fetchval("SELECT COUNT(*) FROM documents WHERE state = 'active'")
+        model_count = await conn.fetchval("SELECT COUNT(*) FROM embedding_models")
+        
+        sample_chunk = await conn.fetchrow("""
+            SELECT 
+                c.id,
+                c.content,
+                c.chunk_index,
+                d.title,
+                em.name as model_name,
+                ce.embedding
+            FROM chunks c
+            JOIN chunk_embeddings ce ON c.id = ce.chunk_id
+            JOIN documents d ON c.document_id = d.id
+            JOIN embedding_models em ON ce.model_id = em.id
+            WHERE ce.is_current = TRUE
+            LIMIT 1
+        """)
+        
+        return {
+            "stats": {
+                "total_embeddings": embedding_count,
+                "total_chunks": chunk_count,
+                "total_documents": document_count,
+                "total_models": model_count
+            },
+            "sample_chunk": {
+                "id": str(sample_chunk["id"]) if sample_chunk else None,
+                "content_preview": sample_chunk["content"][:100] + "..." if sample_chunk else None,
+                "chunk_index": sample_chunk["chunk_index"] if sample_chunk else None,
+                "document_title": sample_chunk["title"] if sample_chunk else None,
+                "model_name": sample_chunk["model_name"] if sample_chunk else None,
+                "embedding_length": len(sample_chunk["embedding"]) if sample_chunk else None
+            } if sample_chunk else None
+        }
+
 @app.post("/query", response_model=QueryResponse)
 async def query_chunks(request: QueryRequest):
-    """
-    Query for relevant chunks using vector similarity search
-    Takes a user query and returns the most relevant chunks
-    """
     try:
-        # Initialize Bedrock embeddings
         embeddings = BedrockEmbeddings(
             model_id=request.model_name,
             region_name=os.getenv('AWS_REGION', 'us-east-1')
         )
         
-        # Generate query embedding
         query_embedding = embeddings.embed_query(request.query)
         
         pool = await get_db_pool()
         
         async with pool.acquire() as conn:
-            # Use the find_similar_chunks function from schema
             rows = await conn.fetch("""
-                SELECT * FROM find_similar_chunks($1::vector(1536), $2, $3, $4)
+                SELECT * FROM find_similar_chunks($1::vector(1536), $2::float, $3::int, $4::text)
             """, query_embedding, request.similarity_threshold, request.max_results, request.model_name)
             
-            # Convert results to ChunkResult objects
             results = []
             for row in rows:
                 chunk_result = ChunkResult(
