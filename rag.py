@@ -11,8 +11,6 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings
 
 load_dotenv()
-
-# API Configuration
 API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
 
 def get_api_client():
@@ -101,8 +99,6 @@ def embed_chunks(chunks: List[str]) -> List[List[float]]:
     embeddings = embeddings_model.embed_documents(chunks)
     return embeddings
 
-# Incremental Processing Functions
-
 def precheck_s3_file(bucket_name: str, file_info: Dict) -> Dict:
     """Check if S3 file should be downloaded based on fingerprint"""
     try:
@@ -122,7 +118,6 @@ def precheck_s3_file(bucket_name: str, file_info: Dict) -> Dict:
 
 def check_document_exists(content: str) -> Dict:
     """Check if document with given content checksum already exists"""
-    # Normalize text if you have a normalizer; at least strip
     norm = content.strip()
     sha = hashlib.sha256(norm.encode("utf-8")).hexdigest()
     
@@ -134,8 +129,6 @@ def check_document_exists(content: str) -> Dict:
     except Exception as e:
         print(f"Checksum check failed: {e}")
         return {"exists": False}
-
-# HTTP Client Functions for API calls
 
 def get_or_create_embedding_model(name: str = "amazon.titan-embed-text-v1", 
                                  provider: str = "bedrock", embedding_dim: int = 1536,
@@ -244,7 +237,7 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
     try:
         print(f"Processing: {file_key}")
         
-        # Extract text from PDF
+
         text = get_pdf_text_from_s3(bucket_name, file_key)
         if not text or text.startswith("Error extracting text"):
             print(f"Failed to extract text from {file_key}")
@@ -252,13 +245,13 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
         
         print(f"Extracted text length: {len(text)} characters")
         
-        # Check if document content already exists (incremental processing)
+
         checksum_check = check_document_exists(text)
         if checksum_check.get("exists"):
             print(f"SKIP chunk+embed (same checksum): {file_key}")
             return True
         
-        # Create or get source
+
         source_uri = f"s3://{bucket_name}/{file_key}"
         source_metadata = {
             "size": file_info['size'],
@@ -275,7 +268,7 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
             metadata=source_metadata
         )
         
-        # Create document
+
         doc_metadata = {
             "file_size": file_info['size'],
             "last_modified": file_info['last_modified'],
@@ -293,7 +286,7 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
             metadata=doc_metadata
         )
         
-        # Create chunks
+
         chunks = chunk_text(text)
         print(f"Created {len(chunks)} chunks")
         
@@ -304,11 +297,11 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
             print(f"ERROR creating chunks: {str(e)}")
             raise
         
-        # Generate embeddings
+
         embeddings = embed_chunks(chunks)
         print(f"Generated {len(embeddings)} embeddings")
         
-        # Store embeddings
+
         try:
             embedding_ids = create_chunk_embeddings(chunk_ids, embeddings, model_id)
             print(f"Successfully stored {len(embedding_ids)} embeddings via API")
@@ -324,13 +317,13 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
 
 def main():
     try:
-        # Check required environment variables
+
         bucket_name = os.getenv('AWS_S3_BUCKET')
         if not bucket_name:
             print("Please set AWS_S3_BUCKET in your .env file")
             return
         
-        # Check API connection
+
         try:
             with get_api_client() as client:
                 response = client.get("/health")
@@ -342,21 +335,21 @@ def main():
             return
         
         try:
-            # Get or create embedding model
+    
             model_id = get_or_create_embedding_model()
             print(f"Using embedding model ID: {model_id}")
             
-            # Create ingestion run
+    
             ingestion_run_id = create_ingestion_run(
                 source_label=f"S3 bucket: {bucket_name}",
                 notes="Automated PDF ingestion from S3"
             )
             print(f"Started ingestion run: {ingestion_run_id}")
             
-            # Update status to running
+    
             update_ingestion_run_status(ingestion_run_id, "running")
             
-            # Get list of files from S3
+    
             print("Fetching files from S3...")
             files = list_s3_files()
             
@@ -365,7 +358,7 @@ def main():
                 update_ingestion_run_status(ingestion_run_id, "succeeded", "No files to process")
                 return
             
-            # Process PDF files
+    
             pdf_files = [f for f in files if f['key'].lower().endswith('.pdf')]
             print(f"Found {len(pdf_files)} PDF files to process")
             
@@ -373,12 +366,12 @@ def main():
             failed_files = 0
             
             for file_info in pdf_files:
-                # Check if file should be downloaded using S3 fingerprint
+        
                 precheck = precheck_s3_file(bucket_name, file_info)
                 
                 if not precheck.get("should_download", True):
                     print(f"SKIP download (etag match): {file_info['key']}")
-                    successful_files += 1  # Count as successful since file is up-to-date
+            
                     continue
                 
                 success = process_s3_file_to_api(
@@ -392,7 +385,7 @@ def main():
                 
                 print("-" * 50)
             
-            # Update ingestion run status
+    
             if failed_files == 0:
                 status = "succeeded"
                 notes = f"Successfully processed {successful_files} files"
@@ -408,7 +401,7 @@ def main():
             
         except Exception as e:
             print(f"Error during processing: {str(e)}")
-            # Try to update ingestion run status if it exists
+    
             try:
                 if 'ingestion_run_id' in locals():
                     update_ingestion_run_status(ingestion_run_id, "failed", str(e))
