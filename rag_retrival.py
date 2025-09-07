@@ -27,8 +27,8 @@ class ChatResponse(BaseModel):
 
 class RetrievalConfig(BaseModel):
     max_results: int = 10
-    similarity_threshold: float = 0.5
-    model_name: str = "amazon.titan-embed-text-v1"
+    similarity_threshold: float = 0.7
+    model_name: str = "text-embedding-ada-002"
 
 def fetch_relevant_documents(query: str, config: RetrievalConfig) -> List[Document]:
     try:

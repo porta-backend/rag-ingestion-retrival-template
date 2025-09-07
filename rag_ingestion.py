@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Optional
 import PyPDF2
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_aws import BedrockEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
@@ -87,14 +87,14 @@ def chunk_text(text: str, chunk_size: int = 300, chunk_overlap: int = 60) -> Lis
     chunks = text_splitter.split_text(text)
     return chunks
 
-def get_bedrock_embeddings():
-    return BedrockEmbeddings(
-        model_id="amazon.titan-embed-text-v1",
-        region_name=os.getenv('AWS_REGION', 'us-east-1')
+def get_openai_embeddings():
+    return OpenAIEmbeddings(
+        model="text-embedding-ada-002",
+        openai_api_key=os.getenv('OPENAI_API_KEY')
     )
 
 def embed_chunks(chunks: List[str]) -> List[List[float]]:
-    embeddings_model = get_bedrock_embeddings()
+    embeddings_model = get_openai_embeddings()
     embeddings = embeddings_model.embed_documents(chunks)
     
     print(f"[INGESTION] Generated {len(embeddings)} embeddings")
@@ -140,8 +140,8 @@ def check_document_exists(content: str) -> Dict:
         print(f"Checksum check failed: {e}")
         return {"exists": False}
 
-def get_or_create_embedding_model(name: str = "amazon.titan-embed-text-v1", 
-                                 provider: str = "bedrock", embedding_dim: int = 1536,
+def get_or_create_embedding_model(name: str = "text-embedding-ada-002", 
+                                 provider: str = "openai", embedding_dim: int = 1536,
                                  distance_metric: str = "cosine", version: str = "v1") -> str:
     with get_api_client() as client:
         response = client.post("/embedding-models", json={

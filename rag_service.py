@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, status, Query
 from pydantic import BaseModel, field_validator
 import asyncpg
 from pgvector.asyncpg import register_vector
-from langchain_aws import BedrockEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 
@@ -44,8 +44,8 @@ async def shutdown_event():
         await db_pool.close()
 
 class EmbeddingModelCreate(BaseModel):
-    name: str = "amazon.titan-embed-text-v1"
-    provider: str = "bedrock"
+    name: str = "text-embedding-ada-002"
+    provider: str = "openai"
     embedding_dim: int = 1536
     distance_metric: str = "cosine"
     version: str = "v1"
@@ -190,7 +190,7 @@ class QueryRequest(BaseModel):
     query: str
     similarity_threshold: float = 0.7
     max_results: int = 10
-    model_name: str = "amazon.titan-embed-text-v1"
+    model_name: str = "text-embedding-ada-002"
 
 class ChunkResult(BaseModel):
     chunk_id: str
@@ -512,7 +512,7 @@ async def search_similar_chunks(
     query_embedding: List[float],
     similarity_threshold: float = Query(0.7, ge=0.0, le=1.0),
     max_results: int = Query(10, ge=1, le=100),
-    model_name: str = Query("amazon.titan-embed-text-v1")
+    model_name: str = Query("text-embedding-ada-002")
 ):
     pool = await get_db_pool()
     
@@ -612,9 +612,13 @@ async def get_debug_stats():
 @app.post("/query", response_model=QueryResponse)
 async def query_chunks(request: QueryRequest):
     try:
-        embeddings = BedrockEmbeddings(
-            model_id=request.model_name,
-            region_name=os.getenv('AWS_REGION', 'us-east-1')
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if not openai_key:
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY environment variable not set")
+        
+        embeddings = OpenAIEmbeddings(
+            model=request.model_name,
+            openai_api_key=openai_key
         )
         
         query_embedding = embeddings.embed_query(request.query)

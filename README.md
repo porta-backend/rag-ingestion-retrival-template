@@ -1,13 +1,13 @@
 # RAG (Retrieval-Augmented Generation) System
 
-A comprehensive Python-based RAG system that processes PDF documents from AWS S3, extracts text, creates embeddings using Amazon Bedrock's Titan embedding model, and stores everything in a PostgreSQL database with pgvector support for efficient similarity search.
+A comprehensive Python-based RAG system that processes PDF documents from AWS S3, extracts text, creates embeddings using OpenAI's text-embedding-ada-002 model, and stores everything in a PostgreSQL database with pgvector support for efficient similarity search.
 
 ## Features
 
 - **S3 Integration**: Automatically downloads and processes PDF files from AWS S3 buckets
 - **PDF Text Extraction**: Extracts text content from PDF documents using PyPDF2
 - **Text Chunking**: Splits large documents into manageable chunks with configurable overlap
-- **AWS Bedrock Embeddings**: Uses Amazon Titan embedding model to generate vector representations
+- **OpenAI Embeddings**: Uses OpenAI text-embedding-ada-002 model to generate vector representations
 - **PostgreSQL + pgvector Storage**: Stores documents, chunks, and embeddings in a structured database
 - **Vector Similarity Search**: Efficient similarity search using pgvector's HNSW indexing
 - **Ingestion Tracking**: Tracks ingestion runs with status and metadata
@@ -18,7 +18,7 @@ A comprehensive Python-based RAG system that processes PDF documents from AWS S3
 ## Prerequisites
 
 - Python 3.7+
-- AWS Account with Bedrock access
+- OpenAI API key
 - AWS S3 bucket with PDF files
 - AWS credentials configured
 - PostgreSQL database with pgvector extension
@@ -57,6 +57,9 @@ AWS_ACCESS_KEY_ID=your_access_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_key_here
 AWS_REGION=us-east-1
 AWS_S3_BUCKET=your-bucket-name
+
+# OpenAI Configuration
+OPENAI_API_KEY=your_openai_api_key_here
 
 # Database Configuration (for API service)
 HOST=your-database-host
@@ -111,7 +114,7 @@ The script will:
    - Download and extract text
    - Create document and source records via API
    - Split text into chunks
-   - Generate embeddings using Amazon Bedrock Titan model
+   - Generate embeddings using OpenAI text-embedding-ada-002 model
    - Store everything in the database via API
 6. Update ingestion run status via API
 
@@ -174,7 +177,7 @@ rag_ingestion/
 - `list_s3_files()`: Lists files in S3 bucket
 - `extract_text_from_pdf()`: Extracts text from PDF content
 - `chunk_text()`: Splits text into overlapping chunks
-- `embed_chunks()`: Generates embeddings using Bedrock
+- `embed_chunks()`: Generates embeddings using OpenAI
 
 ### Database Functions
 - `get_db_pool()`: Creates PostgreSQL connection pool with pgvector support
@@ -199,10 +202,10 @@ rag_ingestion/
 
 - **Chunk Size**: Default 300 characters (configurable in `chunk_text()`)
 - **Chunk Overlap**: Default 60 characters (configurable in `chunk_text()`)
-- **Embedding Model**: Amazon Titan Embed Text v1 (1536 dimensions)
+- **Embedding Model**: OpenAI text-embedding-ada-002 (1536 dimensions)
 - **AWS Region**: Configurable via environment variable
 - **Database Connection**: PostgreSQL with pgvector extension
-- **Similarity Threshold**: Configurable in search functions (default 0.5 for retrieval, 0.7 for direct search)
+- **Similarity Threshold**: Configurable in search functions (default 0.7 for all search operations)
 - **Search Limit**: Configurable number of results (default 10)
 - **Chat Memory**: Maintains conversation history with window of 5 messages
 
@@ -235,12 +238,12 @@ This project is open source and available under the [MIT License](LICENSE).
 
 For issues and questions, please open an issue on the GitHub repository.
 
-## AWS Bedrock Setup
+## OpenAI Setup
 
-Ensure your AWS account has:
-1. Bedrock service enabled
-2. Access to Amazon Titan embedding models
-3. Proper IAM permissions for S3 and Bedrock access
+Ensure you have:
+1. OpenAI API key with access to text-embedding-ada-002 model
+2. Sufficient API credits for embedding generation
+3. Proper IAM permissions for S3 access (for document ingestion)
 
 ## Security Notes
 

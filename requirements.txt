@@ -10,6 +10,7 @@ langchain-aws
 langchain-community
 langchain-postgres
 psycopg[binary]
+langchain_openai
 
 # FastAPI and web server
 fastapi
