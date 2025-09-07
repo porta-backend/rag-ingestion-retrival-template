@@ -1,6 +1,6 @@
 # RAG (Retrieval-Augmented Generation) System with AWS Bedrock
 
-A Python-based RAG system that processes PDF documents from AWS S3, extracts text, creates embeddings using Amazon Bedrock's Titan embedding model, and displays the vector representations.
+A Python-based RAG system that processes PDF documents from AWS S3, extracts text, creates embeddings using Amazon Bedrock's Titan embedding model, and displays the vector representations. This is the generalized RAG system for use in Porta.
 
 ## Features
 
