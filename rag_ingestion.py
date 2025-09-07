@@ -78,7 +78,7 @@ def get_pdf_text_from_s3(bucket_name: str, file_key: str) -> str:
     file_content = download_file_from_s3(bucket_name, file_key)
     return extract_text_from_pdf(file_content)
 
-def chunk_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 250, chunk_overlap: int = 100) -> List[str]:
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
