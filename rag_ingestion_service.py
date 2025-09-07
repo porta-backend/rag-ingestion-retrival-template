@@ -103,6 +103,7 @@ class SourceCreate(BaseModel):
     s3_key: Optional[str] = None
     s3_etag: Optional[str] = None
     content_hash: Optional[str] = None
+    last_modified: Optional[str] = None  # ISO format timestamp
     metadata: Optional[Dict] = None
 
 class SourceResponse(BaseModel):
@@ -218,15 +219,20 @@ async def precheck_s3(obj: S3Precheck):
         if not row:
             return S3PrecheckResp(should_download=True, source_id=None)
 
+        # Check etag match
         same_etag = (obj.etag is not None and obj.etag == row["s3_etag"])
-        # Optionally also compare size/last_modified from metadata:
-        # stored = json.loads(row["metadata"]) if row["metadata"] else {}
-        # same_size = stored.get("size") == obj.size
-        # same_lm = stored.get("last_modified") == obj.last_modified
         
-        # Simple, conservative check: if ETag matches, skip download
-        if same_etag:
-            # Refresh last_seen_at for housekeeping
+        # Check last_modified match from metadata
+        stored_metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+        stored_last_modified = stored_metadata.get("last_modified")
+        same_last_modified = (obj.last_modified is not None and 
+                             stored_last_modified is not None and 
+                             obj.last_modified == stored_last_modified)
+        
+        # Conservative check: both etag and last_modified must match to skip download
+        # This provides better safety against edge cases where etag might be the same
+        # but the file was actually modified
+        if same_etag and same_last_modified:
             await conn.execute("UPDATE sources SET last_seen_at = now() WHERE id=$1", row["id"])
             return S3PrecheckResp(should_download=False, source_id=str(row["id"]))
 
@@ -311,6 +317,10 @@ async def create_or_get_source(source: SourceCreate):
     """Create or get source using UPSERT for idempotent operations"""
     pool = await get_db_pool()
     m = source.metadata or {}
+    
+    # If this is an S3 source and we have last_modified info, store it in metadata
+    if source.kind == 's3' and source.last_modified:
+        m['last_modified'] = source.last_modified
     
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""

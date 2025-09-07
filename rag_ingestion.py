@@ -166,7 +166,8 @@ def update_ingestion_run_status(run_id: str, status: str, notes: str = None):
 
 def get_or_create_source(kind: str, uri: str, bucket: str = None, 
                         s3_key: str = None, s3_etag: str = None, 
-                        content_hash: str = None, metadata: Dict = None) -> str:
+                        content_hash: str = None, last_modified: str = None,
+                        metadata: Dict = None) -> str:
     """Get or create source via API"""
     with get_api_client() as client:
         response = client.post("/sources", json={
@@ -176,6 +177,7 @@ def get_or_create_source(kind: str, uri: str, bucket: str = None,
             "s3_key": s3_key,
             "s3_etag": s3_etag,
             "content_hash": content_hash,
+            "last_modified": last_modified,
             "metadata": metadata or {}
         })
         response.raise_for_status()
@@ -265,6 +267,7 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
             bucket=bucket_name,
             s3_key=file_key,
             s3_etag=file_info['etag'],
+            last_modified=file_info['last_modified'],
             metadata=source_metadata
         )
         
