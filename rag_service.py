@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, status, Query
 from pydantic import BaseModel, field_validator
 import asyncpg
 from pgvector.asyncpg import register_vector
+from langchain_aws import BedrockEmbeddings
 
 load_dotenv()
 
@@ -196,6 +197,31 @@ class S3PrecheckResp(BaseModel):
 class ChecksumExistsResp(BaseModel):
     exists: bool = False
     document_id: Optional[str] = None
+
+# Query models for RAG retrieval
+class QueryRequest(BaseModel):
+    query: str
+    similarity_threshold: float = 0.7
+    max_results: int = 10
+    model_name: str = "amazon.titan-embed-text-v1"
+
+class ChunkResult(BaseModel):
+    chunk_id: str
+    content: str
+    similarity_score: float
+    document_title: Optional[str] = None
+    document_author: Optional[str] = None
+    source_uri: Optional[str] = None
+    chunk_index: Optional[int] = None
+    token_count: Optional[int] = None
+    metadata: Optional[Dict] = None
+
+class QueryResponse(BaseModel):
+    query: str
+    results: List[ChunkResult]
+    total_results: int
+    similarity_threshold: float
+    model_name: str
 
 # API Endpoints
 @app.get("/health")
@@ -460,6 +486,172 @@ async def create_embeddings(embedding_data: EmbeddingCreate):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
     return EmbeddingResponse(embedding_ids=embedding_ids)
+
+# New retrieval endpoints for RAG system
+@app.get("/documents")
+async def get_documents(limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
+    """Get documents with pagination"""
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        # Get documents with source info
+        rows = await conn.fetch("""
+            SELECT d.id, d.title, d.author, d.uri, d.mime_type, d.created_at,
+                   s.kind as source_kind, s.uri as source_uri
+            FROM documents d
+            JOIN sources s ON d.source_id = s.id
+            WHERE d.state = 'active'
+            ORDER BY d.created_at DESC
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+        
+        # Get total count
+        total_count = await conn.fetchval("SELECT COUNT(*) FROM documents WHERE state = 'active'")
+        
+        return {
+            "documents": [dict(row) for row in rows],
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset
+        }
+
+@app.get("/documents/{document_id}/chunks")
+async def get_document_chunks(document_id: str, limit: int = Query(100, ge=1, le=1000)):
+    """Get chunks for a specific document"""
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, chunk_index, content, token_count, metadata, created_at
+            FROM chunks
+            WHERE document_id = $1
+            ORDER BY chunk_index ASC
+            LIMIT $2
+        """, document_id, limit)
+        
+        return {
+            "document_id": document_id,
+            "chunks": [dict(row) for row in rows],
+            "count": len(rows)
+        }
+
+@app.post("/search/similar")
+async def search_similar_chunks(
+    query_embedding: List[float],
+    similarity_threshold: float = Query(0.7, ge=0.0, le=1.0),
+    max_results: int = Query(10, ge=1, le=100),
+    model_name: str = Query("amazon.titan-embed-text-v1")
+):
+    """Search for similar chunks using vector similarity"""
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        # Use the find_similar_chunks function from schema
+        rows = await conn.fetch("""
+            SELECT * FROM find_similar_chunks($1::vector, $2, $3, $4)
+        """, query_embedding, similarity_threshold, max_results, model_name)
+        
+        return {
+            "query_embedding_dim": len(query_embedding),
+            "similarity_threshold": similarity_threshold,
+            "max_results": max_results,
+            "model_name": model_name,
+            "results": [dict(row) for row in rows],
+            "count": len(rows)
+        }
+
+@app.get("/chunks/{chunk_id}")
+async def get_chunk_details(chunk_id: str):
+    """Get detailed information about a specific chunk"""
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT c.id, c.chunk_index, c.content, c.token_count, c.metadata, c.created_at,
+                   d.title as document_title, d.author as document_author,
+                   s.kind as source_kind, s.uri as source_uri
+            FROM chunks c
+            JOIN documents d ON c.document_id = d.id
+            JOIN sources s ON d.source_id = s.id
+            WHERE c.id = $1
+        """, chunk_id)
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Chunk not found")
+        
+        return dict(row)
+
+@app.get("/embedding-models")
+async def get_embedding_models():
+    """Get all embedding models"""
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, provider, embedding_dim, distance_metric, version, created_at
+            FROM embedding_models
+            ORDER BY created_at DESC
+        """)
+        
+        return {
+            "models": [dict(row) for row in rows],
+            "count": len(rows)
+        }
+
+@app.post("/query", response_model=QueryResponse)
+async def query_chunks(request: QueryRequest):
+    """
+    Query for relevant chunks using vector similarity search
+    Takes a user query and returns the most relevant chunks
+    """
+    try:
+        # Initialize Bedrock embeddings
+        embeddings = BedrockEmbeddings(
+            model_id=request.model_name,
+            region_name=os.getenv('AWS_REGION', 'us-east-1')
+        )
+        
+        # Generate query embedding
+        query_embedding = embeddings.embed_query(request.query)
+        
+        pool = await get_db_pool()
+        
+        async with pool.acquire() as conn:
+            # Use the find_similar_chunks function from schema
+            rows = await conn.fetch("""
+                SELECT * FROM find_similar_chunks($1::vector(1536), $2, $3, $4)
+            """, query_embedding, request.similarity_threshold, request.max_results, request.model_name)
+            
+            # Convert results to ChunkResult objects
+            results = []
+            for row in rows:
+                chunk_result = ChunkResult(
+                    chunk_id=str(row['chunk_id']),
+                    content=row['content'],
+                    similarity_score=float(row['similarity']),
+                    document_title=row.get('document_title'),
+                    document_author=row.get('document_author'),
+                    source_uri=row.get('source_uri'),
+                    chunk_index=row.get('chunk_index'),
+                    token_count=row.get('token_count'),
+                    metadata=row.get('metadata')
+                )
+                results.append(chunk_result)
+            
+            return QueryResponse(
+                query=request.query,
+                results=results,
+                total_results=len(results),
+                similarity_threshold=request.similarity_threshold,
+                model_name=request.model_name
+            )
+            
+    except Exception as e:
+        print(f"Error in query endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error processing query: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
