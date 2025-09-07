@@ -5,6 +5,7 @@
 .env.test.local
 .env.production.local
 schema.sql
+*.sql
 # Python
 __pycache__/
 *.py[cod]
