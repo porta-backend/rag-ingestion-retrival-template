@@ -3,6 +3,7 @@ import os
 import io
 import httpx
 import hashlib
+import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from typing import List, Dict, Optional
@@ -11,6 +12,16 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
 API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
 
 def get_api_client():
@@ -51,7 +62,7 @@ def list_s3_files(bucket_name: str = None, prefix: str = "") -> List[Dict[str, s
         return files
     
     except Exception as e:
-        print(f"Error listing files from S3: {str(e)}")
+        logger.error(f"Error listing files from S3: {str(e)}")
         raise
 
 def download_file_from_s3(bucket_name: str, file_key: str) -> bytes:
@@ -60,7 +71,7 @@ def download_file_from_s3(bucket_name: str, file_key: str) -> bytes:
         response = s3_client.get_object(Bucket=bucket_name, Key=file_key)
         return response['Body'].read()
     except Exception as e:
-        print(f"Error downloading file {file_key}: {str(e)}")
+        logger.error(f"Error downloading file {file_key}: {str(e)}")
         raise
 
 def extract_text_from_pdf(file_content: bytes) -> str:
@@ -97,11 +108,11 @@ def embed_chunks(chunks: List[str]) -> List[List[float]]:
     embeddings_model = get_openai_embeddings()
     embeddings = embeddings_model.embed_documents(chunks)
     
-    print(f"[INGESTION] Generated {len(embeddings)} embeddings")
+    logger.info(f"[INGESTION] Generated {len(embeddings)} embeddings")
     if embeddings:
-        print(f"[INGESTION] First embedding type: {type(embeddings[0])}")
-        print(f"[INGESTION] First embedding length: {len(embeddings[0])}")
-        print(f"[INGESTION] First embedding sample: {embeddings[0][:5]}")
+        logger.debug(f"[INGESTION] First embedding type: {type(embeddings[0])}")
+        logger.debug(f"[INGESTION] First embedding length: {len(embeddings[0])}")
+        logger.debug(f"[INGESTION] First embedding sample: {embeddings[0][:5]}")
         
         for i, embedding in enumerate(embeddings):
             if not isinstance(embedding, list):
@@ -124,7 +135,7 @@ def precheck_s3_file(bucket_name: str, file_info: Dict) -> Dict:
             response.raise_for_status()
             return response.json()
     except Exception as e:
-        print(f"Precheck failed for {file_info['key']}, falling back to download: {e}")
+        logger.warning(f"Precheck failed for {file_info['key']}, falling back to download: {e}")
         return {"should_download": True}
 
 def check_document_exists(content: str) -> Dict:
@@ -137,7 +148,7 @@ def check_document_exists(content: str) -> Dict:
             response.raise_for_status()
             return response.json()
     except Exception as e:
-        print(f"Checksum check failed: {e}")
+        logger.warning(f"Checksum check failed: {e}")
         return {"exists": False}
 
 def get_or_create_embedding_model(name: str = "text-embedding-ada-002", 
@@ -224,10 +235,10 @@ def create_chunks(document_id: str, chunks: List[str],
 
 def create_chunk_embeddings(chunk_ids: List[str], embeddings: List[List[float]], 
                            model_id: str) -> List[str]:
-    print(f"[INGESTION] Sending {len(embeddings)} embeddings to API")
-    print(f"[INGESTION] First embedding type: {type(embeddings[0]) if embeddings else 'N/A'}")
-    print(f"[INGESTION] First embedding length: {len(embeddings[0]) if embeddings else 'N/A'}")
-    print(f"[INGESTION] First embedding sample: {embeddings[0][:5] if embeddings else 'N/A'}")
+    logger.info(f"[INGESTION] Sending {len(embeddings)} embeddings to API")
+    logger.debug(f"[INGESTION] First embedding type: {type(embeddings[0]) if embeddings else 'N/A'}")
+    logger.debug(f"[INGESTION] First embedding length: {len(embeddings[0]) if embeddings else 'N/A'}")
+    logger.debug(f"[INGESTION] First embedding sample: {embeddings[0][:5] if embeddings else 'N/A'}")
     
     with get_api_client() as client:
         response = client.post("/embeddings", json={
@@ -244,18 +255,18 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
     file_key = file_info['key']
     
     try:
-        print(f"Processing: {file_key}")
+        logger.info(f"Processing: {file_key}")
         
         text = get_pdf_text_from_s3(bucket_name, file_key)
         if not text or text.startswith("Error extracting text"):
-            print(f"Failed to extract text from {file_key}")
+            logger.error(f"Failed to extract text from {file_key}")
             return False
         
-        print(f"Extracted text length: {len(text)} characters")
+        logger.info(f"Extracted text length: {len(text)} characters")
         
         checksum_check = check_document_exists(text)
         if checksum_check.get("exists"):
-            print(f"SKIP chunk+embed (same checksum): {file_key}")
+            logger.info(f"SKIP chunk+embed (same checksum): {file_key}")
             return True
         
         source_uri = f"s3://{bucket_name}/{file_key}"
@@ -293,71 +304,71 @@ def process_s3_file_to_api(bucket_name: str, file_info: Dict,
         )
         
         chunks = chunk_text(text)
-        print(f"Created {len(chunks)} chunks")
+        logger.info(f"Created {len(chunks)} chunks")
         
         try:
             chunk_ids = create_chunks(document_id, chunks)
-            print(f"Successfully created {len(chunk_ids)} chunk records in database")
+            logger.info(f"Successfully created {len(chunk_ids)} chunk records in database")
         except Exception as e:
-            print(f"ERROR creating chunks: {str(e)}")
+            logger.error(f"ERROR creating chunks: {str(e)}")
             raise
         
         embeddings = embed_chunks(chunks)
-        print(f"Generated {len(embeddings)} embeddings")
+        logger.info(f"Generated {len(embeddings)} embeddings")
         
 
         try:
             embedding_ids = create_chunk_embeddings(chunk_ids, embeddings, model_id)
-            print(f"Successfully stored {len(embedding_ids)} embeddings via API")
+            logger.info(f"Successfully stored {len(embedding_ids)} embeddings via API")
         except Exception as e:
-            print(f"ERROR storing embeddings: {str(e)}")
+            logger.error(f"ERROR storing embeddings: {str(e)}")
             raise
         
         return True
         
     except Exception as e:
-        print(f"Error processing {file_key}: {str(e)}")
+        logger.error(f"Error processing {file_key}: {str(e)}")
         return False
 
 def main():
     try:
         bucket_name = os.getenv('AWS_S3_BUCKET')
         if not bucket_name:
-            print("Please set AWS_S3_BUCKET in your .env file")
+            logger.error("Please set AWS_S3_BUCKET in your .env file")
             return
         
         try:
             with get_api_client() as client:
                 response = client.get("/health")
                 response.raise_for_status()
-                print("Connected to API successfully")
+                logger.info("Connected to API successfully")
         except Exception as e:
-            print(f"Failed to connect to API: {str(e)}")
-            print("Make sure the API service is running on the configured URL")
+            logger.error(f"Failed to connect to API: {str(e)}")
+            logger.error("Make sure the API service is running on the configured URL")
             return
         
         try:
             model_id = get_or_create_embedding_model()
-            print(f"Using embedding model ID: {model_id}")
+            logger.info(f"Using embedding model ID: {model_id}")
             
             ingestion_run_id = create_ingestion_run(
                 source_label=f"S3 bucket: {bucket_name}",
                 notes="Automated PDF ingestion from S3"
             )
-            print(f"Started ingestion run: {ingestion_run_id}")
+            logger.info(f"Started ingestion run: {ingestion_run_id}")
             
             update_ingestion_run_status(ingestion_run_id, "running")
             
-            print("Fetching files from S3...")
+            logger.info("Fetching files from S3...")
             files = list_s3_files()
             
             if not files:
-                print("No files found in the bucket")
+                logger.info("No files found in the bucket")
                 update_ingestion_run_status(ingestion_run_id, "succeeded", "No files to process")
                 return
             
             pdf_files = [f for f in files if f['key'].lower().endswith('.pdf')]
-            print(f"Found {len(pdf_files)} PDF files to process")
+            logger.info(f"Found {len(pdf_files)} PDF files to process")
             
             successful_files = 0
             failed_files = 0
@@ -366,7 +377,7 @@ def main():
                 precheck = precheck_s3_file(bucket_name, file_info)
                 
                 if not precheck.get("should_download", True):
-                    print(f"SKIP download (etag match): {file_info['key']}")
+                    logger.info(f"SKIP download (etag match): {file_info['key']}")
                     continue
                 
                 success = process_s3_file_to_api(
@@ -378,7 +389,7 @@ def main():
                 else:
                     failed_files += 1
                 
-                print("-" * 50)
+                logger.debug("-" * 50)
             
             if failed_files == 0:
                 status = "succeeded"
@@ -391,10 +402,10 @@ def main():
                 notes = f"Processed {successful_files} files successfully, {failed_files} failed"
             
             update_ingestion_run_status(ingestion_run_id, status, notes)
-            print(f"\nIngestion completed: {notes}")
+            logger.info(f"\nIngestion completed: {notes}")
             
         except Exception as e:
-            print(f"Error during processing: {str(e)}")
+            logger.error(f"Error during processing: {str(e)}")
             try:
                 if 'ingestion_run_id' in locals():
                     update_ingestion_run_status(ingestion_run_id, "failed", str(e))
@@ -402,7 +413,7 @@ def main():
                 pass
             
     except Exception as e:
-        print(f"Error: {str(e)}")
+        logger.error(f"Error: {str(e)}")
 
 if __name__ == "__main__":
     main()
