@@ -6,6 +6,7 @@
 .env.production.local
 schema.sql
 *.sql
+.cursorignore
 # Python
 __pycache__/
 *.py[cod]

@@ -27,3 +27,6 @@ sqlalchemy
 
 # Data validation
 pydantic
+
+# OpenAI API (for direct embeddings)
+openai

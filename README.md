@@ -1,8 +1,8 @@
-# RAG (Retrieval-Augmented Generation) System
+# RAG Ingestion & Retrieval Template
 
-A comprehensive Python-based RAG system that processes PDF documents from AWS S3, extracts text, creates embeddings using OpenAI's text-embedding-ada-002 model, and stores everything in a PostgreSQL database with pgvector support for efficient similarity search.
+A comprehensive Python-based RAG (Retrieval-Augmented Generation) system template that processes PDF documents from AWS S3, extracts text, creates embeddings using OpenAI's text-embedding-ada-002 model, and stores everything in a PostgreSQL database with pgvector support for efficient similarity search.
 
-## Features
+## 🚀 Features
 
 - **S3 Integration**: Automatically downloads and processes PDF files from AWS S3 buckets
 - **PDF Text Extraction**: Extracts text content from PDF documents using PyPDF2
@@ -14,8 +14,9 @@ A comprehensive Python-based RAG system that processes PDF documents from AWS S3
 - **Comprehensive Metadata**: Stores rich metadata for sources, documents, and chunks
 - **Error Handling**: Comprehensive error handling for robust operation
 - **Conversational RAG**: Chat interface with session management and conversation history
+- **FastAPI Services**: RESTful APIs for both ingestion and retrieval operations
 
-## Prerequisites
+## 📋 Prerequisites
 
 - Python 3.7+
 - OpenAI API key
@@ -24,12 +25,12 @@ A comprehensive Python-based RAG system that processes PDF documents from AWS S3
 - PostgreSQL database with pgvector extension
 - Database credentials configured
 
-## Installation
+## 🛠️ Installation
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/pavankota20/porta-rag.git
-cd porta-rag
+git clone https://github.com/porta-backend/rag-ingestion-retrival-template.git
+cd rag-ingestion-retrival-template
 ```
 
 2. Create a virtual environment:
@@ -43,14 +44,9 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Configuration
+## ⚙️ Configuration
 
-1. Copy the environment example file:
-```bash
-cp .env.example .env
-```
-
-2. Edit `.env` file with your AWS credentials and database configuration:
+1. Create a `.env` file with your configuration:
 ```env
 # AWS Configuration
 AWS_ACCESS_KEY_ID=your_access_key_here
@@ -72,7 +68,7 @@ DATABASE=your-database-name
 API_BASE_URL=http://localhost:8000
 ```
 
-## Database Setup
+## 🗄️ Database Setup
 
 Before running the system, ensure your PostgreSQL database has the required schema. The system expects the following tables:
 
@@ -83,9 +79,9 @@ Before running the system, ensure your PostgreSQL database has the required sche
 - `chunks`: Stores text chunks with full-text search support
 - `chunk_embeddings`: Stores vector embeddings with pgvector support
 
-See the database schema files for the complete table definitions.
+See the `schema_rag_ingestion.sql` file for the complete table definitions.
 
-## Usage
+## 🚀 Usage
 
 ### 1. Start the Database API Service
 
@@ -128,7 +124,7 @@ python rag_retrival.py
 
 This will start the conversational RAG API on `http://localhost:8001`.
 
-## API Endpoints
+## 📡 API Endpoints
 
 ### Database API (Port 8000)
 
@@ -154,23 +150,23 @@ This will start the conversational RAG API on `http://localhost:8001`.
 - `DELETE /chat/{session_id}` - Clear a chat session
 - `GET /chat/sessions` - List active chat sessions
 
-## Project Structure
+## 📁 Project Structure
 
 ```
-rag_ingestion/
-├── rag_ingestion.py      # Main RAG ingestion script
-├── rag_service.py        # FastAPI service for database operations
-├── rag_retrival.py       # Conversational RAG API service
-├── requirements.txt      # Python dependencies
-├── schema_rag_ingestion.sql  # Database schema for RAG system
-├── schema_users&chat.sql     # Database schema for users and chat
-├── .env                  # Environment variables (create from template)
-├── .gitignore           # Git ignore rules
-├── README.md            # This file
-└── venv/                # Virtual environment (not tracked)
+rag-ingestion-retrival-template/
+├── rag_ingestion.py              # Main RAG ingestion script
+├── rag_service.py                # FastAPI service for database operations
+├── rag_retrival.py               # Conversational RAG API service
+├── requirements.txt              # Python dependencies
+├── schema_rag_ingestion.sql      # Database schema for RAG system
+├── schema_rag_ingestion_updated.sql  # Updated database schema
+├── .env                          # Environment variables (create from template)
+├── .gitignore                    # Git ignore rules
+├── README.md                     # This file
+└── venv/                         # Virtual environment (not tracked)
 ```
 
-## Key Functions
+## 🔧 Key Functions
 
 ### Core RAG Functions
 - `get_s3_client()`: Creates AWS S3 client
@@ -198,7 +194,7 @@ rag_ingestion/
 - `process_s3_file_to_api()`: Processes a single S3 file end-to-end
 - `main()`: Orchestrates the entire RAG pipeline with database integration
 
-## Configuration Options
+## ⚙️ Configuration Options
 
 - **Chunk Size**: Default 300 characters (configurable in `chunk_text()`)
 - **Chunk Overlap**: Default 60 characters (configurable in `chunk_text()`)
@@ -209,7 +205,7 @@ rag_ingestion/
 - **Search Limit**: Configurable number of results (default 10)
 - **Chat Memory**: Maintains conversation history with window of 5 messages
 
-## Error Handling
+## 🛡️ Error Handling
 
 The system includes comprehensive error handling for:
 - AWS authentication issues
@@ -222,7 +218,14 @@ The system includes comprehensive error handling for:
 - Database transaction rollbacks
 - API service failures
 
-## Contributing
+## 🔒 Security Notes
+
+- Never commit your `.env` file with real credentials
+- Use IAM roles when possible instead of access keys
+- Regularly rotate your AWS credentials
+- Follow AWS security best practices
+
+## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -230,24 +233,58 @@ The system includes comprehensive error handling for:
 4. Add tests if applicable
 5. Submit a pull request
 
-## License
+## 📄 License
 
 This project is open source and available under the [MIT License](LICENSE).
 
-## Support
+## 🆘 Support
 
 For issues and questions, please open an issue on the GitHub repository.
 
-## OpenAI Setup
+## 🔑 OpenAI Setup
 
 Ensure you have:
 1. OpenAI API key with access to text-embedding-ada-002 model
 2. Sufficient API credits for embedding generation
 3. Proper IAM permissions for S3 access (for document ingestion)
 
-## Security Notes
+## 📊 Example Usage
 
-- Never commit your `.env` file with real credentials
-- Use IAM roles when possible instead of access keys
-- Regularly rotate your AWS credentials
-- Follow AWS security best practices
+### Chat with the RAG System
+
+```bash
+curl -X POST "http://localhost:8001/chat" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "query": "What is the main topic of the documents?",
+       "session_id": "user123"
+     }'
+```
+
+### Query for Similar Chunks
+
+```bash
+curl -X POST "http://localhost:8000/query" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "query": "machine learning algorithms",
+       "similarity_threshold": 0.7,
+       "max_results": 5
+     }'
+```
+
+## 🎯 Use Cases
+
+This template is perfect for:
+- Document search and retrieval systems
+- Question-answering applications
+- Knowledge base construction
+- Content recommendation systems
+- Research assistance tools
+- Customer support chatbots
+- Legal document analysis
+- Academic paper processing
+
+---
+
+**Template Repository**: This is a template repository for RAG ingestion and retrieval systems. Use this as a starting point for your own RAG applications.
