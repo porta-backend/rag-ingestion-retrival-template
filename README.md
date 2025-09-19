@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # RAG Ingestion & Retrieval Template
 
 A comprehensive Python-based RAG (Retrieval-Augmented Generation) system template that processes PDF documents from AWS S3, extracts text, creates embeddings using OpenAI's text-embedding-ada-002 model, and stores everything in a PostgreSQL database with pgvector support for efficient similarity search.
@@ -288,3 +289,7 @@ This template is perfect for:
 ---
 
 **Template Repository**: This is a template repository for RAG ingestion and retrieval systems. Use this as a starting point for your own RAG applications.
+=======
+# rag-ingestion-retrival-template
+Use this anywhere in the application for ingestion and retrival
+>>>>>>> 14c84719192ab5e15b58f85f8e8172a7976c7857
